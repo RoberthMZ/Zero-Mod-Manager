@@ -1,0 +1,664 @@
+QMainWindow, QWidget {
+    background-color: #1a0f2d;
+    color: #f0f0f0;
+    font-family: 'Consolas', 'Lucida Console', 'Andale Mono', 'monospace';
+    outline: 0;
+}
+
+#TitleLabel {
+    font-size: 52px;
+    font-weight: bold;
+    color: #ffffff;
+}
+
+#PathFrame {
+    background-color: rgba(44, 31, 77, 0.7);
+    border: 1px solid #4a3a6a;
+    border-radius: 8px;
+    padding: 8px;
+}
+
+#PathLabel {
+    color: #a090c0;
+    font-style: italic;
+    font-size: 14px;
+    padding-left: 10px;
+}
+
+#ChangePathButton {
+    background-color: #4a3a6a;
+    border: 1px solid #6a5a8a;
+    border-radius: 5px;
+    font-size: 12px;
+    padding: 6px 10px;
+}
+
+#ChangePathButton:hover {
+    background-color: #5a4a7a;
+    color: #fff;
+}
+
+QTabWidget::pane {
+    border: 1px solid #4a3a6a;
+    border-radius: 8px;
+    background-color: rgba(44, 31, 77, 0.7);
+}
+
+QTabBar::tab {
+    background: #2a1a4a;
+    color: #a090c0;
+    padding: 15px;
+    font-size: 16px;
+    font-weight: bold;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    border: 1px solid #4a3a6a;
+    border-bottom: none;
+    margin-right: 2px;
+}
+
+QTabBar::tab:selected {
+    background: rgba(44, 31, 77, 0.9);
+    color: #ffc900;
+    border-bottom: 1px solid #2c1f4d;
+}
+
+#ProfileManagerFrame {
+    background-color: rgba(26, 15, 45, 0.8);
+    border-radius: 8px;
+    border: 1px solid #4a3a6a;
+    margin-bottom: 10px;
+}
+#ProfileLabel {
+    color: #ffc900;
+    font-weight: bold;
+    font-size: 14px;
+}
+QComboBox {
+    background-color: #3a2a5a;
+    border: 1px solid #6a5a8a;
+    border-radius: 5px;
+    padding: 5px;
+    min-height: 27px;
+    color: #f0f0f0;
+    font-size: 14px;
+}
+QComboBox::drop-down {
+    border: none;
+}
+
+QComboBox QListView {
+    background-color: #ffc900; 
+    color: black; 
+    border: 1px solid #ffc80096;
+    outline: 0px; 
+}
+
+QComboBox QListView::item {
+    background-color: #ffc900; 
+    min-height: 27px; 
+}
+
+QComboBox QListView::item:selected {
+    background-color: #252525; 
+}
+
+#ModList {
+    background-color: transparent;
+    border: none;
+    color: #f0f0f0;
+}
+
+#ModList::item {
+    padding: 0px;
+    border-radius: 8px;
+    margin: -4px 0;
+}
+
+#ModList::item:hover {
+    background-color: rgba(67, 51, 99, 0.6);
+}
+
+#ModList::item:selected {
+    background-color: rgba(67, 51, 99, 1);
+    border: 2px solid #ffc900;
+}
+
+#ModLabel {
+    font-size: 18px;
+    background: transparent;
+    color: #f0f0f0;
+}
+
+#ModDetailsFrame {
+    background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #2a1a4a, stop:1 #201538);
+    border-radius: 10px;
+    border: 1px solid #4a3a6a;
+    padding: 20px;
+}
+#ModDetailName {
+    font-size: 24px;
+    font-weight: bold;
+    color: #e0d8f0;
+    margin-bottom: 5px;
+}
+#ModDetailAuthor {
+    font-size: 16px;
+    color: #a090c0;
+    font-style: italic;
+    margin-bottom: 15px;
+}
+#ModDetailImageContainer {
+    background-color: #1a0f2d;
+    border: 1px solid #4a3a6a;
+    border-radius: 8px;
+    margin-bottom: 15px;
+}
+#ModDetailImageContainer QLabel {
+    color: #a090c0;
+    font-style: italic;
+}
+#ModDetailInfoLabel {
+    font-size: 14px;
+    color: #b0a0d0;
+}
+#ModDetailUpdateStatus {
+    font-size: 16px;
+    font-weight: bold;
+    color: #ffc900;
+    background-color: rgba(255, 201, 0, 0.1);
+    border: 1px solid #ffc900;
+    border-radius: 5px;
+    padding: 10px;
+    margin-top: 10px;
+}
+#UpdateModButton {
+    background-color: #00d1c1;
+    color: #000000;
+    border-radius: 5px;
+    padding: 8px 12px;
+    font-size: 14px;
+    font-weight: bold;
+}
+#UpdateModButton:hover {
+    background-color: #2CF4E3;
+}
+#UpdateModButton:disabled {
+    background-color: #3a2a5a;
+    color: #6a5a8a;
+    border-color: #4a3a6a;
+}
+
+QPushButton {
+    background-color: #3a2a5a;
+    color: #e0d8f0;
+    border: 1px solid #6a5a8a;
+    border-radius: 5px;
+    padding: 8px 12px;
+    font-size: 14px;
+    min-height: 22px;
+}
+
+QPushButton:hover {
+    background-color: #4a3a6a;
+    border-color: #856ec4;
+    color: #fff;
+}
+
+QPushButton:pressed {
+    background-color: #2a1a4a;
+}
+
+QPushButton:disabled {
+    background-color: #2c1f4d;
+    color: #6a5a8a;
+    border-color: #4a3a6a;
+}
+
+#InstallButton, #UpdateButton {
+    background-color: #00a2d4;
+    font-weight: bold;
+    color: #fff;
+    border: 1px solid #00d1c1;
+}
+#InstallButton:hover, #UpdateButton:hover {
+    background-color: #00b2e4;
+}
+
+#ToggleButton, #DeleteButton {
+    font-size: 12px;
+    padding: 4px 8px;
+    min-height: 22px;
+    font-weight: normal;
+    background-color: transparent; 
+    border: 1px solid #856ec4;     
+    color: #a090c0;               
+}
+
+#ToggleButton:hover, #DeleteButton:hover {
+    background-color: #433363;
+    color: #ffffff;
+}
+
+#ToggleButton:disabled, #DeleteButton:disabled {
+    background-color: transparent;
+    border-color: #4a3a6a;
+    color: #6a5a8a;
+}
+
+#DeleteButton {
+    border-color: #c0392b; 
+    color: #e74c3c;     
+}
+
+#DeleteButton:hover {
+    background-color: #c0392b; 
+    border-color: #e74c3c;
+    color: #ffffff;
+}
+
+#TopBarFrame {
+    background-color: rgba(44, 31, 77, 0.8);
+    border: 1px solid #4a3a6a;
+    border-radius: 8px;
+    margin: 5px;
+}
+
+#TopBarFrame QLabel {
+    color: #e0d8f0;
+    font-size: 14px;
+    font-weight: bold;
+    margin-left: 5px;
+    white-space: nowrap;
+}
+
+#TopBarFrame QComboBox, #TopBarFrame QLineEdit, #TopBarFrame QCheckBox {
+    padding: 3px 6px;
+    font-size: 13px;
+    border-radius: 4px;
+    min-width: 80px;
+    margin-left: 0px;
+    margin-right: 0px;
+}
+
+#TopBarFrame QLineEdit {
+    min-width: 120px;
+}
+
+#TopBarFrame QCheckBox {
+    spacing: 5px;
+}
+
+#StatusMessageLabel {
+    font-size: 18px;
+    font-weight: bold;
+    color: #ffc900;
+    margin: 20px;
+}
+
+#ModCardScrollArea {
+    background-color: transparent;
+    border: none;
+}
+
+#ModCard {
+    background-color: #2c1f4d;
+    border: 1px solid #4a3a6a;
+    border-radius: 8px;
+    padding: 10px;
+    min-width: 200px;
+}
+
+#ModCardName {
+    font-size: 16px;
+    font-weight: bold;
+    color: #f0f0f0;
+    background: transparent;
+    margin-bottom: 2px;
+}
+
+#ModCardAuthor {
+    font-size: 11px;
+    color: #a090c0;
+    font-style: italic;
+    background: transparent;
+    padding-bottom: 5px;
+    margin-top: 0;
+}
+
+#ModCardUrl {
+    font-size: 12px;
+    color: #00a2d4;
+    text-decoration: underline;
+    padding-bottom: 5px;
+}
+#ModCardUrl:hover {
+    color: #00b2e4;
+}
+
+#ModCard QLabel {
+    background: transparent;
+}
+
+#ModCardImage {
+    margin-top: 5px;
+    margin-bottom: 5px;
+    background-color: #1a0f2d;
+    border: 1px solid #4a3a6a;
+    border-radius: 5px;
+}
+
+#ModCard QHBoxLayout QLabel {
+    font-size: 12px;
+    color: #e0d8f0;
+    margin-right: 5px;
+}
+
+#ModCardDate {
+    font-size: 11px;
+    color: #b0a0d0;
+    margin-top: 5px;
+    margin-bottom: 5px;
+}
+
+#ModCard #DownloadButton {
+    background-color: #00a2d4;
+    font-weight: bold;
+    color: #fff;
+    border: 1px solid #00d1c1;
+    width: 100%;
+    padding: 6px 10px;
+    font-size: 13px;
+}
+#ModCard #DownloadButton:hover {
+    background-color: #00b2e4;
+}
+#ModCard #DownloadButton:disabled {
+    background-color: #3a2a5a;
+    color: #6a5a8a;
+    border-color: #4a3a6a;
+}
+
+QProgressBar {
+    border: 1px solid #6a5a8a;
+    border-radius: 5px;
+    text-align: center;
+    color: #e0d8f0;
+}
+
+QProgressBar::chunk {
+    background-color: #00d1c1;
+    border-radius: 5px;
+}
+
+QScrollBar:vertical {
+    border: none;
+    background: #2c1f4d;
+    width: 12px;
+    margin: 0px 0px 0px 0px;
+}
+
+QScrollBar::handle:vertical {
+    background: #4a3a6a;
+    min-height: 25px;
+    border-radius: 6px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: #6a5a8a;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+    background: none;
+}
+
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: none;
+}
+
+QScrollBar:horizontal {
+    border: none;
+    background: #2c1f4d;
+    height: 12px;
+    margin: 0px 0px 0px 0px;
+}
+
+QScrollBar::handle:horizontal {
+    background: #4a3a6a;
+    min-width: 25px;
+    border-radius: 6px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background: #6a5a8a;
+}
+
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0px;
+    background: none;
+}
+
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+    background: none;
+}
+
+QLineEdit {
+    background-color: #3c2c5c;
+    color: #f0f0f0;
+    border: 1px solid #5a4a7a;
+    border-radius: 5px;
+    padding: 8px;
+    font-size: 14px;
+    min-height: 26px;
+}
+QLineEdit::placeholder {
+    color: #a090c0;
+}
+
+QStatusBar {
+    color: #a090c0;
+    font-style: italic;
+}
+
+QCheckBox {
+    spacing: 5px;
+    color: #f0f0f0;
+    font-size: 14px;
+}
+
+QCheckBox::indicator {
+    width: 20px;
+    height: 20px;
+    border: 1px solid #5a4a7a;
+    border-radius: 4px;
+    background-color: #3c2c5c;
+}
+
+QCheckBox::indicator:checked {
+    background-color: #00a2d4;
+    border: 1px solid #00d1c1;
+    image: url(%%CHECK_IMAGE_PATH%%);
+}
+
+QCheckBox::indicator:hover {
+    border-color: #00a2d4;
+}
+
+QCheckBox::indicator:checked:hover {
+    background-color: #00b2e4;
+}
+
+QCheckBox:disabled {
+    color: #6a5a8a;
+}
+
+QCheckBox::indicator:disabled {
+    border-color: #4a3a6a;
+    background-color: #2c1f4d;
+}
+
+#SettingsGroup {
+    border: 1px solid #4a3a6a;
+    border-radius: 8px;
+    padding: 15px;
+    margin-top: 10px;
+}
+
+#SettingsLabel {
+    color: #e0d8f0;
+    font-size: 14px;
+    margin-bottom: 5px;
+}
+
+#InfoTab {
+    background-color: transparent;
+}
+
+#AuthorImageLabel {
+    border: 3px solid #ffc900;
+    border-radius: 60px; 
+    padding: 0px;
+    background-color: #1a0f2d;
+    text-align: center;
+    qproperty-alignment: 'AlignCenter'; 
+}
+
+#AuthorNameLabel {
+    font-size: 32px;
+    font-weight: bold;
+    color: #ffc900; 
+}
+
+#AuthorRealNameLabel {
+    font-size: 16px;
+    font-style: italic;
+    color: #a090c0;
+    margin-top: -15px; 
+}
+
+#GitHubLabel {
+    font-style: italic;
+    font-size: 14px;
+    color: #a090c0;
+    margin-top: -30px; 
+}
+
+#Separator {
+    background-color: #4a3a6a;
+    max-height: 1px;
+}
+
+#VersionLabel {
+    font-size: 20px;
+    color: #a090c0;
+    font-style: italic;
+    margin-top: 10px;
+}
+
+#ThanksLabel {
+    font-size: 16px;
+    color: #e0d8f0;
+    max-width: 500px;
+    padding: 10px;
+}
+
+#DonationTitleLabel {
+    font-size: 18px;
+    color: #ffc900;
+    font-weight: bold;
+    margin-top: 15px;
+}
+
+#MakeWithLove {
+    font-size: 16px;
+    color: #a090c0;
+    margin-bottom: 15px;
+}
+
+#ModeSwitchButton {
+    background-color: #5a4a7a;
+    font-weight: bold;
+    color: #e0d8f0;
+    padding: 8px 15px;
+    margin-left: 10px;
+    border-color: #856ec4;
+    max-height: 35px;
+}
+#ModeSwitchButton:hover {
+    background-color: #6a5a8a;
+    color: #ffffff;
+}
+
+#ModpackViewWidget { padding: 10px; }
+
+#ModpackListLabel {
+    font-size: 18px;
+    font-weight: bold;
+    color: #ffc900;
+    margin-bottom: 10px;
+}
+
+#ModpackList {
+    background-color: transparent;
+    border: none;
+}
+
+#ModpackList::item  {
+    border: 2px solid #f0f0f0; 
+    border-radius: 8px;
+    margin: 10px 15px; 
+}
+#ModpackList::item:selected {
+    border: 2px solid #ffc900; 
+    background-color: rgba(238, 255, 2, 0.144);
+}
+#ModpackList::item:hover {
+    background-color: rgba(67, 51, 99, 0.6);
+}
+
+#ModpackImage {
+    background-color: #1a0f2d;
+    border-radius: 5px;
+    border: 1px solid #4a3a6a;
+    color: #a090c0;
+    font-style: italic;
+}
+
+#ModpackNameLabel {
+    font-size: 20px;
+    font-weight: bold;
+    color: #e0d8f0;
+}
+
+#ModpackAuthorLabel {
+    font-size: 14px;
+    font-style: italic;
+    color: #a090c0;
+}
+
+#ModpackActionButton {
+    font-size: 12px;
+    padding: 4px 8px;
+    min-height: 22px;
+    background-color: #3a2a5a;
+    border: 1px solid #856ec4;
+    color: #a090c0;
+}
+#ModpackActionButton:hover {
+    background-color: #433363;
+    color: #ffffff;
+}
+
+#ModpackModList {
+    background-color: rgba(44, 31, 77, 0.7);
+    border: 1px solid #4a3a6a;
+    border-radius: 8px;
+    padding: 10px;
+    font-size: 16px;
+}
+
+#ModpackModList::item {
+    padding: 5px;
+    color: #e0d8f0;
+}
