@@ -233,5 +233,9 @@
     "btn_save": "Crear Modpack",
     "modpack_dialog_image_preview": "Vista Previa de la Imagen:",
     "modpack_dialog_select_all": "Seleccionar Todos",
-    "modpack_dialog_deselect_all": "Deseleccionar Todos"
+    "modpack_dialog_deselect_all": "Deseleccionar Todos",
+    "dialog_add_image_title": "Añadir Imagen Personalizada",
+    "dialog_add_image_text": "¿Deseas añadir una imagen personalizada para este mod?",
+    "dialog_select_image_title": "Seleccionar Imagen del Mod",
+    "details_click_to_add_image": "Haz clic aquí para añadir una imagen"
 }

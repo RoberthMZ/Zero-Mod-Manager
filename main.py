@@ -37,7 +37,8 @@ MODS_DIR = "mods"
 DOWNLOADS_DIR = "downloads"
 ACTIVE_MODS_BACKUP_DIR = "active_mods_backup"
 MODPACKS_DATA_DIR = "modpacks_data" 
-MODPACKS_LIBRARY_DIR = "modpacks_library" 
+MODPACKS_LIBRARY_DIR = "modpacks_library"
+MOD_IMAGES_DIR = "mod_images"
 NUM_STARS = 350
 ANIMATION_INTERVAL = 12
 
@@ -97,6 +98,18 @@ class _PopenWrapper(object):
 
     def __getattr__(self, name):
         return getattr(self._process, name)
+    
+class ClickableLabel(QLabel):
+    clicked = pyqtSignal()
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
 
 class ModStatusIndicator(QLabel):
     def __init__(self, is_active=False):
@@ -548,7 +561,8 @@ class ZeroManager(QMainWindow):
         self.mod_details_image_container = QFrame()
         self.mod_details_image_container.setObjectName("ModDetailImageContainer")
         image_container_layout = QVBoxLayout(self.mod_details_image_container)
-        self.mod_details_image_label = QLabel("...")
+        self.mod_details_image_label = ClickableLabel("...")
+        self.mod_details_image_label.clicked.connect(self.on_manual_image_area_clicked)
         self.mod_details_image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.mod_details_image_label.setMinimumSize(300, 250)
         image_container_layout.addWidget(self.mod_details_image_label)
@@ -687,6 +701,7 @@ class ZeroManager(QMainWindow):
         os.makedirs(DOWNLOADS_DIR, exist_ok=True)
         os.makedirs(MODPACKS_DATA_DIR, exist_ok=True)
         os.makedirs(MODPACKS_LIBRARY_DIR, exist_ok=True)
+        os.makedirs(MOD_IMAGES_DIR, exist_ok=True)
         try:
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f: self.config = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError): self.config = {}
@@ -750,11 +765,19 @@ class ZeroManager(QMainWindow):
 
     def install_mod_manually(self):
         file_path, _ = QFileDialog.getOpenFileName(self, self.translator.get("dialog_select_mod_title"), "", f"{self.translator.get('dialog_compressed_files')} (*.zip *.rar *.7z)")
-        if not file_path: return
-        mod_name_initial = os.path.splitext(os.path.basename(file_path))[0]
-        self.install_mod_from_path(file_path, mod_name_initial, is_download=False, mod_gamebanana_info=None)
+        if not file_path:
+            return
 
-    def install_mod_from_path(self, file_path, mod_name_initial, is_download=False, mod_gamebanana_info=None):
+        t = self.translator.get
+        image_path = None
+        reply = QMessageBox.question(self, t("dialog_add_image_title"), t("dialog_add_image_text"), QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            image_path, _ = QFileDialog.getOpenFileName(self, t("dialog_select_image_title"), "", "Images (*.png *.jpg *.jpeg)")
+
+        mod_name_initial = os.path.splitext(os.path.basename(file_path))[0]
+        self.install_mod_from_path(file_path, mod_name_initial, is_download=False, mod_gamebanana_info=None, manual_image_path=image_path)
+
+    def install_mod_from_path(self, file_path, mod_name_initial, is_download=False, mod_gamebanana_info=None, manual_image_path=None):
         t = self.translator.get
         clean_mod_name = re.sub(r'[/:*?"<>|]', '', mod_name_initial)
         temp_extract_path = os.path.join(MODS_DIR, f"temp_{clean_mod_name}_{int(time.time())}")
@@ -789,7 +812,22 @@ class ZeroManager(QMainWindow):
             else:
                 shutil.move(source_to_move, final_dest_path)
                 if os.path.exists(temp_extract_path): shutil.rmtree(temp_extract_path)
+
+            saved_image_path = None
+            if manual_image_path and os.path.exists(manual_image_path):
+                try:
+                    image_filename = f"{final_mod_name}{os.path.splitext(manual_image_path)[1]}"
+                    dest_image_path = os.path.join(MOD_IMAGES_DIR, image_filename)
+                    shutil.copy(manual_image_path, dest_image_path)
+                    saved_image_path = dest_image_path
+                except Exception as e:
+                    print(f"Error al copiar la imagen manual: {e}")
+
             mod_entry = self.config["mods"].setdefault(final_mod_name, {"active": False, "deployed_paths": [], "gamebanana_info": None})
+
+            if saved_image_path:
+                mod_entry["manual_image_path"] = saved_image_path
+
             if mod_gamebanana_info:
                 mod_entry["gamebanana_info"] = mod_gamebanana_info
                 mod_entry["gamebanana_info"]["update_available"] = False
@@ -1194,6 +1232,13 @@ class ZeroManager(QMainWindow):
         mod_data = self.config["mods"].get(mod_name, {})
         if mod_data.get("active"):
             self._apply_mod_state(mod_name, False, None, None)
+
+        manual_image_path = mod_data.get("manual_image_path")
+        if manual_image_path and os.path.exists(manual_image_path):
+            try:
+                os.remove(manual_image_path)
+            except Exception as e:
+                print(f"ADVERTENCIA: No se pudo eliminar la imagen del mod '{manual_image_path}'. Error: {e}")
         
         mod_local_path = os.path.join(MODS_DIR, mod_name)
         if os.path.exists(mod_local_path):
@@ -1248,24 +1293,82 @@ class ZeroManager(QMainWindow):
         except TypeError: pass
         self.current_mod_for_update = None
 
+    def change_manual_mod_image(self):
+        t = self.translator.get
+        mod_name = self.current_mod_for_update
+        if not mod_name:
+            return
+
+        image_path, _ = QFileDialog.getOpenFileName(self, t("dialog_select_image_title"), "", "Images (*.png *.jpg *.jpeg)")
+        if image_path:
+            try:
+                mod_data = self.config["mods"].get(mod_name, {})
+                old_image_path = mod_data.get("manual_image_path")
+                if old_image_path and os.path.exists(old_image_path):
+                    try:
+                        os.remove(old_image_path)
+                    except Exception as e:
+                        print(f"ADVERTENCIA: No se pudo eliminar la imagen anterior: {e}")
+
+                image_filename = f"{mod_name}{os.path.splitext(image_path)[1]}"
+                dest_image_path = os.path.join(MOD_IMAGES_DIR, image_filename)
+                shutil.copy(image_path, dest_image_path)
+                
+                self.config["mods"][mod_name]["manual_image_path"] = dest_image_path
+                self.save_config()
+                
+                self.display_mod_details(self.mod_list.currentItem(), None)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"No se pudo guardar la imagen: {e}")
+    
+    def on_manual_image_area_clicked(self):
+        if not self.current_mod_for_update:
+            return
+        
+        mod_data = self.config["mods"].get(self.current_mod_for_update, {})
+        if not mod_data.get("gamebanana_info"):
+            self.change_manual_mod_image()
+
     def display_mod_details(self, current_item, previous_item):
         t = self.translator.get
         self._clear_mod_details_ui()
-        if current_item is None or current_item.data(Qt.ItemDataRole.UserRole) is None: return
+        
+        self.mod_details_image_label.setCursor(Qt.CursorShape.ArrowCursor)
+
+        if current_item is None or current_item.data(Qt.ItemDataRole.UserRole) is None:
+            return
         mod_name = current_item.data(Qt.ItemDataRole.UserRole)
         mod_data = self.config["mods"].get(mod_name)
-        if not mod_data: return
-        self.mod_details_name_label.setText(mod_name)
+        if not mod_data:
+            return
+
         self.current_mod_for_update = mod_name
+        
         gamebanana_info = mod_data.get("gamebanana_info")
-        if gamebanana_info and gamebanana_info.get('_idRow'):
-            self.mod_details_name_label.setText(gamebanana_info.get('_sName', mod_name))
-            self.mod_details_author_label.setText(t("details_author_prefix").format(author=gamebanana_info.get('author_name', t("details_unknown_author"))))
-            image_url = gamebanana_info.get('image_url')
-            if image_url:
+        
+        display_name = mod_name
+        if gamebanana_info and gamebanana_info.get('_sName'):
+            display_name = gamebanana_info.get('_sName')
+        self.mod_details_name_label.setText(display_name)
+
+        if not gamebanana_info:
+            self.mod_details_image_label.setCursor(Qt.CursorShape.PointingHandCursor)
+            manual_image_path = mod_data.get("manual_image_path")
+            if manual_image_path and os.path.exists(manual_image_path):
+                pixmap = QPixmap(manual_image_path)
+                self._set_detail_image(self.mod_details_image_label, pixmap)
+            else:
+                self.mod_details_image_label.setText(t("details_click_to_add_image"))
+        else:
+            if gamebanana_info.get('image_url'):
+                image_url = gamebanana_info.get('image_url')
                 self.mod_details_image_label.setText(t("details_loading_image"))
                 threading.Thread(target=self._fetch_image_for_details, args=(self.mod_details_image_label, image_url), daemon=True).start()
-            else: self.mod_details_image_label.setText(t("details_no_image"))
+            else:
+                self.mod_details_image_label.setText(t("details_no_image"))
+        
+        if gamebanana_info and gamebanana_info.get('_idRow'):
+            self.mod_details_author_label.setText(t("details_author_prefix").format(author=gamebanana_info.get('author_name', t("details_unknown_author"))))
             created_ts, last_updated_ts = gamebanana_info.get('_tsDateAdded', 0), gamebanana_info.get('_tsDateModified', 0)
             is_update = last_updated_ts != created_ts
             status_text = t("details_date_updated") if is_update else t("details_date_published")
@@ -1275,7 +1378,9 @@ class ZeroManager(QMainWindow):
             if profile_url:
                 self.mod_details_url_label.setText(f'<a href="{profile_url}" style="color: #00d1c1;">{t("details_view_on_gb")}</a>')
                 self.mod_details_url_label.linkActivated.connect(lambda link: QDesktopServices.openUrl(QUrl(link)))
-            else: self.mod_details_url_label.setText(t("details_gb_url_not_available"))
+            else:
+                self.mod_details_url_label.setText(t("details_gb_url_not_available"))
+            
             if gamebanana_info.get("update_available", False):
                 self.mod_details_update_status_label.setText(t("details_update_available"))
                 self.update_single_mod_button.show()
@@ -1287,9 +1392,9 @@ class ZeroManager(QMainWindow):
                 self.mod_details_update_status_label.setText(t("details_mod_is_up_to_date"))
                 self.update_single_mod_button.hide()
         else:
-            self.mod_details_name_label.setText(mod_name)
-            self.mod_details_image_label.setText(t("details_manual_install"))
             self.mod_details_author_label.setText(t("details_no_gb_data"))
+            self.mod_details_date_label.setText("")
+            self.mod_details_url_label.setText("")
             self.mod_details_update_status_label.setText(t("details_cannot_check_updates"))
             self.update_single_mod_button.hide()
 

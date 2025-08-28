@@ -149,7 +149,7 @@ class InfoTab(QWidget):
         separator1.setObjectName("Separator")
         card_layout.addWidget(separator1)
 
-        self.version_label = QLabel("Zero Mod Manager v1.0.0")
+        self.version_label = QLabel("Zero Mod Manager v1.0.4")
         self.version_label.setObjectName("VersionLabel")
         self.version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
