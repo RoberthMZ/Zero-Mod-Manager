@@ -43,6 +43,7 @@
   "dialog_extract_error_text": "Não foi possível extrair o arquivo. Você pode não ter o 7-Zip ou WinRAR instalado e configurado no PATH do seu sistema.\n\nErro original: {error}",
   "dialog_generic_install_error_text": "Não foi possível instalar o mod '{mod_name}'.\nErro: {error}\n\nCertifique-se de ter o 7-Zip ou WinRAR instalado.",
   "dialog_action_not_allowed_title": "Ação não permitida",
+  "dialog_bypass_stop_sparking": "Feche o Dragon Ball: Sparking! ZERO antes.",
   "dialog_set_valid_game_path_first": "Por favor, defina um caminho de jogo válido primeiro.",
   "dialog_bypass_error_title": "Erro ao Gerenciar Bypass",
   "dialog_bypass_error_text": "Ocorreu um erro: {error}",

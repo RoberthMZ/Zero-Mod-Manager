@@ -11,6 +11,7 @@ import requests
 import locale
 import zipfile
 import subprocess
+import psutil
 
 try:
     import winreg
@@ -22,7 +23,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QPushButton, QVBoxLayout
                              QMessageBox, QFileDialog, QFrame, QStatusBar, QTabWidget,
                              QSpacerItem, QSizePolicy, QComboBox, QInputDialog, QStackedWidget,
                              QDialog, QScrollArea, QCheckBox, QGridLayout, QLineEdit)
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject, QUrl, QThread, QEventLoop, QPointF, QSize
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject, QUrl, QThread, QEventLoop, QPointF, QSize, QEvent
 from PyQt6.QtGui import QPixmap, QPainter, QColor, QFontMetrics, QDesktopServices, QIcon, QPen
 
 from translation import Translator
@@ -304,6 +305,7 @@ class ZeroManager(QMainWindow):
         self.update_worker_signals.update_process_finished.connect(self._on_update_process_finished)
         self.update_file_selection_handler = UpdateFileSelectionHandler()
         self.update_file_selection_handler.show_dialog_request.connect(self.update_file_selection_handler.show_dialog)
+        
         self.current_mod_for_update = None
         self.timer = None
         self.setup_ui()
@@ -425,6 +427,7 @@ class ZeroManager(QMainWindow):
         header_layout.addWidget(self.title_label)
         header_layout.addStretch()
         self.modding_power_button = QPushButton("MODO TRANSFORMACIÓN")
+        self.modding_power_button.installEventFilter(self)
         self.modding_power_button.setObjectName("PowerButton")
         self.modding_power_button.setCheckable(True)
         self.modding_power_button.toggled.connect(self.update_power_button_style)
@@ -804,14 +807,28 @@ class ZeroManager(QMainWindow):
             if is_download and os.path.exists(file_path): os.remove(file_path)
             self.sync_mods_folder()
 
+
+    def eventFilter(self, obj, event):
+        if obj is self.modding_power_button:
+            if event.type() == QEvent.Type.MouseButtonPress:
+                game_processes = ["SparkingZERO.exe", "SparkingZERO-Win64-Shipping.exe"]
+                for proc in psutil.process_iter(['name']):
+                    if proc.info['name'] in game_processes:
+                        t = self.translator.get
+                        QMessageBox.warning(self, t("dialog_action_not_allowed_title"), t("dialog_bypass_stop_sparking"))
+                        return True
+        
+        return super().eventFilter(obj, event)
+
     def manage_bypass(self, checked):
         t = self.translator.get
         if not self.game_path_is_valid:
-            QMessageBox.warning(self, t("dialog_action_not_allowed_title"), t("dialog_set_valid_game_path_first"))
+            self.modding_power_button.blockSignals(True)
             self.modding_power_button.setChecked(not checked)
+            self.modding_power_button.blockSignals(False)
+            QMessageBox.warning(self, t("dialog_action_not_allowed_title"), t("dialog_set_valid_game_path_first"))
             return
-        self.config["bypass_active"] = checked
-        self.save_config()
+
         source_dir = resource_path("resources")
         game_base_path = self.config["game_path"]
         win64_path = os.path.join(game_base_path, "SparkingZERO", "Binaries", "Win64")
@@ -821,9 +838,18 @@ class ZeroManager(QMainWindow):
         backup_paks_mods_path = os.path.join(ACTIVE_MODS_BACKUP_DIR, "~mods")
         plugins_in_game_path = os.path.join(win64_path, "plugins")
         backup_plugins_path = os.path.join(ACTIVE_MODS_BACKUP_DIR, "plugins")
+
         try:
             if checked:
-                shutil.copytree(source_dir, win64_path, dirs_exist_ok=True)
+                needs_copy = False
+                if os.path.exists(source_dir):
+                    for item_name in os.listdir(source_dir):
+                        dest_path = os.path.join(win64_path, item_name)
+                        if not os.path.exists(dest_path):
+                            needs_copy = True
+                            break
+                if needs_copy:
+                    shutil.copytree(source_dir, win64_path, dirs_exist_ok=True)
                 if os.path.exists(backup_plugins_path):
                     if os.path.exists(plugins_in_game_path): shutil.rmtree(plugins_in_game_path)
                     shutil.move(backup_plugins_path, plugins_in_game_path)
@@ -831,26 +857,42 @@ class ZeroManager(QMainWindow):
                 os.makedirs(os.path.dirname(game_paks_mods_path), exist_ok=True)
                 if os.path.exists(backup_mods_path): shutil.move(backup_mods_path, game_mods_path)
                 if os.path.exists(backup_paks_mods_path): shutil.move(backup_paks_mods_path, game_paks_mods_path)
-                self.statusBar().showMessage(t("status_modding_activated"), 5000)
             else:
-                if os.path.exists(game_mods_path): shutil.move(game_mods_path, backup_mods_path)
-                if os.path.exists(game_paks_mods_path): shutil.move(game_paks_mods_path, backup_paks_mods_path)
                 os.makedirs(ACTIVE_MODS_BACKUP_DIR, exist_ok=True)
-                if os.path.exists(plugins_in_game_path): shutil.move(plugins_in_game_path, backup_plugins_path)
-                for item_name in os.listdir(source_dir):
-                    dest_path = os.path.join(win64_path, item_name)
-                    if os.path.exists(dest_path):
-                        if os.path.isdir(dest_path): shutil.rmtree(dest_path)
-                        else: os.remove(dest_path)
-                self.statusBar().showMessage(t("status_modding_deactivated"), 5000)
+                if os.path.exists(game_mods_path):
+                    if os.path.exists(backup_mods_path): shutil.rmtree(backup_mods_path)
+                    shutil.move(game_mods_path, backup_mods_path)
+                if os.path.exists(game_paks_mods_path):
+                    if os.path.exists(backup_paks_mods_path): shutil.rmtree(backup_paks_mods_path)
+                    shutil.move(game_paks_mods_path, backup_paks_mods_path)
+                if os.path.exists(plugins_in_game_path):
+                    if os.path.exists(backup_plugins_path): shutil.rmtree(backup_plugins_path)
+                    shutil.move(plugins_in_game_path, backup_plugins_path)
+                if os.path.exists(source_dir):
+                    for item_name in os.listdir(source_dir):
+                        dest_path = os.path.join(win64_path, item_name)
+                        if os.path.exists(dest_path):
+                            if os.path.isdir(dest_path): shutil.rmtree(dest_path)
+                            else: os.remove(dest_path)
+        
         except Exception as e:
-            QMessageBox.critical(self, t("dialog_bypass_error_title"), t("dialog_bypass_error_text").format(error=e))
+            self.modding_power_button.blockSignals(True)
             self.modding_power_button.setChecked(not checked)
-            self.config["bypass_active"] = not checked
-            self.save_config()
+            self.modding_power_button.blockSignals(False)
+            QMessageBox.critical(self, t("dialog_bypass_error_title"), t("dialog_bypass_error_text").format(error=e))
+            return
+        
+        self.config["bypass_active"] = checked
+        self.save_config()
+
+        if checked:
+            self.statusBar().showMessage(t("status_modding_activated"), 5000)
+        else:
+            self.statusBar().showMessage(t("status_modding_deactivated"), 5000)
+            
         self.update_ui_state()
         self.sync_mods_folder()
-
+        
     def _determine_mod_type(self, mod_path):
         if not os.path.isdir(mod_path): return None
         files = [item.lower() for item in os.listdir(mod_path) if os.path.isfile(os.path.join(mod_path, item))]
@@ -1053,15 +1095,20 @@ class ZeroManager(QMainWindow):
 
     def prompt_for_game_path(self, force_prompt=False):
         t = self.translator.get
+        
         if not self.game_path_is_valid or force_prompt:
             QMessageBox.information(self, t("dialog_select_game_folder_title"), t("dialog_select_game_folder_text"))
             path = QFileDialog.getExistingDirectory(self, t("dialog_select_game_folder_title_short"))
-            if path and self.validate_game_path(path):
-                self.statusBar().showMessage(t("status_game_path_set").format(path=path), 5000)
-                return path
-            self.game_path_is_valid = False
-            self.statusBar().showMessage(t("status_invalid_path_or_cancelled"), 5000)
-            return ""
+
+            if path:
+                if self.validate_game_path(path):
+                    self.statusBar().showMessage(t("status_game_path_set").format(path=path), 5000)
+                    return path
+                else:
+                    self.game_path_is_valid = False
+                    self.statusBar().showMessage(t("status_invalid_path_or_cancelled"), 5000)
+                    return ""
+
         return self.config.get("game_path", "")
 
     def validate_game_path(self, path):
@@ -1163,6 +1210,7 @@ class ZeroManager(QMainWindow):
         t = self.translator.get
         new_path = self.prompt_for_game_path(force_prompt=True)
         if new_path:
+            self.modding_power_button.setChecked(False)
             self.game_path_label.setText(f"{t('game_path_label')}: {new_path}")
             self.config["game_path"] = new_path
             self.save_config()
