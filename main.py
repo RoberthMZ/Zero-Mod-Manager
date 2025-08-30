@@ -1,5 +1,10 @@
 import sys
 import os
+if getattr(sys, 'frozen', False):
+    application_path = os.path.dirname(sys.executable)
+else:
+    application_path = os.path.dirname(os.path.abspath(__file__))
+os.chdir(application_path)
 import json
 import shutil
 import re
@@ -12,6 +17,7 @@ import locale
 import zipfile
 import subprocess
 import psutil
+import urllib.parse
 
 try:
     import winreg
@@ -23,8 +29,20 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QPushButton, QVBoxLayout
                              QMessageBox, QFileDialog, QFrame, QStatusBar, QTabWidget,
                              QSpacerItem, QSizePolicy, QComboBox, QInputDialog, QStackedWidget,
                              QDialog, QScrollArea, QCheckBox, QGridLayout, QLineEdit)
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject, QUrl, QThread, QEventLoop, QPointF, QSize, QEvent
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject, QUrl, QThread, QEventLoop, QPointF, QSize, QEvent, QCommandLineParser, QCommandLineOption
 from PyQt6.QtGui import QPixmap, QPainter, QColor, QFontMetrics, QDesktopServices, QIcon, QPen
+from PyQt6.QtNetwork import QLocalServer, QLocalSocket
+
+IS_WINDOWS = sys.platform == 'win32'
+IS_MACOS = sys.platform == 'darwin'
+
+if IS_WINDOWS:
+    try:
+        import win32gui # type: ignore
+        import win32con # type: ignore
+    except ImportError:
+        print("Advertencia: El paquete 'pywin32' no está instalado.")
+        IS_WINDOWS = False 
 
 from translation import Translator
 from download_tab import DownloadTab, format_timestamp, FileSelectionDialog
@@ -32,13 +50,15 @@ from settings_tab import SettingsTab
 from info_tab import InfoTab
 
 SPARKING_ZERO_STEAM_APPID = "1790600"
+
 CONFIG_FILE = "config.json"
-MODS_DIR = "mods" 
+MODS_DIR = "mods"
 DOWNLOADS_DIR = "downloads"
 ACTIVE_MODS_BACKUP_DIR = "active_mods_backup"
-MODPACKS_DATA_DIR = "modpacks_data" 
+MODPACKS_DATA_DIR = "modpacks_data"
 MODPACKS_LIBRARY_DIR = "modpacks_library"
 MOD_IMAGES_DIR = "mod_images"
+
 NUM_STARS = 350
 ANIMATION_INTERVAL = 12
 
@@ -68,7 +88,7 @@ def resource_path(relative_path):
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
 
-check_image_path = resource_path("img/check.png").replace('\\', '/') 
+check_image_path = resource_path("img/check.png").replace('\\', '/')
 
 _original_popen = subprocess.Popen
 
@@ -128,6 +148,109 @@ class ModStatusIndicator(QLabel):
         painter.end()
         self.setPixmap(pixmap)
 
+class ProfileEditDialog(QDialog):
+    def __init__(self, translator, all_mods, profile_name="", selected_mods=None, parent=None):
+        super().__init__(parent)
+        self.translator = translator
+        self.profile_name = profile_name
+        self.is_new_profile = not bool(profile_name)
+
+        if self.is_new_profile:
+            self.setWindowTitle(self.translator.get("dialog_add_profile_title"))
+        else:
+            self.setWindowTitle(self.translator.get("dialog_edit_profile_title").format(profile_name=profile_name))
+
+        self.setMinimumSize(400, 500)
+        self.layout = QVBoxLayout(self)
+
+        if self.is_new_profile:
+            self.name_label = QLabel(self.translator.get("profile_name_label"))
+            self.name_edit = QLineEdit()
+            self.layout.addWidget(self.name_label)
+            self.layout.addWidget(self.name_edit)
+
+        self.mod_list_label = QLabel(self.translator.get("profile_mods_selection_label"))
+        self.layout.addWidget(self.mod_list_label)
+
+        selection_buttons_layout = QHBoxLayout()
+        self.select_all_button = QPushButton(self.translator.get("modpack_dialog_select_all"))
+        self.select_all_button.clicked.connect(self.select_all)
+        self.deselect_all_button = QPushButton(self.translator.get("modpack_dialog_deselect_all"))
+        self.deselect_all_button.clicked.connect(self.deselect_all)
+        selection_buttons_layout.addWidget(self.select_all_button)
+        selection_buttons_layout.addWidget(self.deselect_all_button)
+        self.layout.addLayout(selection_buttons_layout)
+
+        self.mod_list_widget = QListWidget()
+        if selected_mods is None:
+            selected_mods = []
+
+        sorted_mods = sorted(all_mods.items(), key=lambda item: item[1]['display_name'])
+
+        for mod_name, mod_data in sorted_mods:
+            item = QListWidgetItem(mod_data['display_name'])
+            item.setData(Qt.ItemDataRole.UserRole, mod_name)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Checked if mod_name in selected_mods else Qt.CheckState.Unchecked)
+            self.mod_list_widget.addItem(item)
+        
+        self.layout.addWidget(self.mod_list_widget)
+
+        button_box = QHBoxLayout()
+        self.delete_button = QPushButton(self.translator.get("profile_delete"))
+        self.delete_button.setObjectName("DeleteButton")
+        self.delete_button.clicked.connect(self.delete_profile)
+        
+        if self.is_new_profile or self.profile_name == "Default":
+            self.delete_button.hide()
+        
+        button_box.addWidget(self.delete_button)
+        button_box.addStretch()
+
+        self.save_button = QPushButton(self.translator.get("btn_save_p"))
+        self.save_button.clicked.connect(self.accept)
+        button_box.addWidget(self.save_button)
+
+        self.cancel_button = QPushButton(self.translator.get("btn_cancel"))
+        self.cancel_button.clicked.connect(self.reject)
+        button_box.addWidget(self.cancel_button)
+
+        self.layout.addLayout(button_box)
+        
+        self.delete_confirmed = False
+
+    def delete_profile(self):
+        reply = QMessageBox.question(self,
+                                     self.translator.get("dialog_confirm_delete_title"),
+                                     self.translator.get("dialog_confirm_delete_profile_text").format(profile_name=self.profile_name),
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                     QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            self.delete_confirmed = True
+            self.accept() 
+
+    def select_all(self):
+        for i in range(self.mod_list_widget.count()):
+            self.mod_list_widget.item(i).setCheckState(Qt.CheckState.Checked)
+
+    def deselect_all(self):
+        for i in range(self.mod_list_widget.count()):
+            self.mod_list_widget.item(i).setCheckState(Qt.CheckState.Unchecked)
+
+    def get_data(self):
+        profile_name = self.name_edit.text().strip() if self.is_new_profile else self.profile_name
+        selected_mods = []
+        for i in range(self.mod_list_widget.count()):
+            item = self.mod_list_widget.item(i)
+            if item.checkState() == Qt.CheckState.Checked:
+                selected_mods.append(item.data(Qt.ItemDataRole.UserRole))
+        
+        return {
+            "name": profile_name,
+            "mods": selected_mods,
+            "deleted": self.delete_confirmed
+        }
+
 class ElidedLabel(QLabel):
     def __init__(self, text, parent=None):
         super().__init__(text, parent)
@@ -164,11 +287,12 @@ class UpdateFileSelectionHandler(QObject):
             result_list_holder.append(None)
 
 class ModpackCreationDialog(QDialog):
-    def __init__(self, available_mods_data, translator, parent=None, modpack_data=None):
+    def __init__(self, available_mods_data, translator, parent=None, modpack_data=None, profiles_data=None):
         super().__init__(parent)
         self.translator = translator
+        self.profiles_data = profiles_data or {}
         self.setWindowTitle(translator.get("modpack_dialog_create_title") if modpack_data is None else translator.get("modpack_dialog_edit_title"))
-        self.setMinimumSize(550, 700)
+        self.setMinimumSize(550, 800)
 
         self.default_image_path = resource_path("img/icon_pack.png")
 
@@ -194,6 +318,13 @@ class ModpackCreationDialog(QDialog):
         
         self.select_image_button = QPushButton(translator.get("modpack_dialog_select_image"))
         self.select_image_button.clicked.connect(self.select_image)
+        
+        self.profile_import_label = QLabel(translator.get("modpack_dialog_import_from_profile"))
+        self.profile_selector = QComboBox()
+        self.profile_selector.addItem(translator.get("modpack_dialog_select_profile_placeholder"))
+        if self.profiles_data:
+            self.profile_selector.addItems(sorted(self.profiles_data.keys()))
+        self.profile_selector.currentIndexChanged.connect(self.apply_profile_selection)
 
         self.mod_list_label = QLabel(translator.get("modpack_dialog_select_mods"))
         
@@ -228,6 +359,12 @@ class ModpackCreationDialog(QDialog):
         self.layout.addWidget(self.image_preview_label, 0, Qt.AlignmentFlag.AlignCenter)
         self.layout.addWidget(self.image_path_label)
         self.layout.addWidget(self.select_image_button)
+        self.layout.addSpacing(15)
+
+        if self.profiles_data: 
+            self.layout.addWidget(self.profile_import_label)
+            self.layout.addWidget(self.profile_selector)
+
         self.layout.addSpacing(10)
         self.layout.addWidget(self.mod_list_label)
         self.layout.addLayout(selection_buttons_layout)
@@ -251,6 +388,21 @@ class ModpackCreationDialog(QDialog):
             self.image_path_label.setText(translator.get("modpack_dialog_no_image_selected"))
 
         self.update_image_preview()
+
+    def apply_profile_selection(self, index):
+        if index <= 0:
+            return
+
+        profile_name = self.profile_selector.currentText()
+        mods_in_profile = self.profiles_data.get(profile_name, [])
+
+        for i in range(self.mod_list_widget.count()):
+            item = self.mod_list_widget.item(i)
+            mod_folder_name = item.data(Qt.ItemDataRole.UserRole)
+            if mod_folder_name in mods_in_profile:
+                item.setCheckState(Qt.CheckState.Checked)
+            else:
+                item.setCheckState(Qt.CheckState.Unchecked)
 
     def select_all_mods(self):
         for i in range(self.mod_list_widget.count()):
@@ -295,10 +447,12 @@ class ModpackCreationDialog(QDialog):
         }
 
 class ZeroManager(QMainWindow):
+    url_received_for_activation = pyqtSignal(str)
     update_mod_details_ui_signal = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
+        self.url_received_for_activation.connect(self.handle_url_activation)
         self.resize(1370, 900)
         self._is_first_show = True
         self.game_path_is_valid = False
@@ -319,9 +473,15 @@ class ZeroManager(QMainWindow):
         self.update_file_selection_handler = UpdateFileSelectionHandler()
         self.update_file_selection_handler.show_dialog_request.connect(self.update_file_selection_handler.show_dialog)
         
+        
         self.current_mod_for_update = None
         self.timer = None
+        self.register_url_scheme()
         self.setup_ui()
+
+        self.download_tab.update_main_status.connect(self.statusBar().showMessage)
+        self.download_tab.show_main_message_box.connect(self._show_message_box_slot)
+
         self.load_config_and_init()
         try:
             check_image_path = resource_path("img/check.png").replace('\\', '/')
@@ -347,6 +507,43 @@ class ZeroManager(QMainWindow):
         msg_box.setText(message)
         msg_box.setIcon(QMessageBox.Icon(icon_int))
         msg_box.exec()
+
+    def new_instance_handler(self):
+        socket = self.local_server.nextPendingConnection()
+        if socket:
+            socket.waitForReadyRead(1000)
+            data = socket.readAll().data().decode('utf-8')
+            socket.close()
+            
+            if data.startswith("zmm:"):
+                self.url_received_for_activation.emit(data)
+    
+    def set_stay_on_top(self, enabled: bool):
+        if IS_WINDOWS:
+            hwnd = self.winId() 
+            if enabled:
+                win32gui.SetWindowPos(hwnd, win32con.HWND_TOPMOST, 0, 0, 0, 0,
+                                      win32con.SWP_NOMOVE | win32con.SWP_NOSIZE)
+            else:
+                win32gui.SetWindowPos(hwnd, win32con.HWND_NOTOPMOST, 0, 0, 0, 0,
+                                      win32con.SWP_NOMOVE | win32con.SWP_NOSIZE)
+        else: 
+            self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, enabled)
+            self.show()
+
+    def _disable_stay_on_top(self):
+        self.set_stay_on_top(False)
+
+    def handle_url_activation(self, url):
+        self.show()
+        self.activateWindow()
+        
+        self.set_stay_on_top(True)
+
+        QTimer.singleShot(3000, self._disable_stay_on_top)
+
+        self.handle_one_click_install(url)
+        pass
 
     def center_and_adjust(self):
         screen_geo = QApplication.primaryScreen().availableGeometry()
@@ -508,12 +705,12 @@ class ZeroManager(QMainWindow):
         self.profile_combo_box.currentIndexChanged.connect(self.change_profile)
         self.add_profile_button = QPushButton("...")
         self.add_profile_button.clicked.connect(self.add_profile)
-        self.delete_profile_button = QPushButton("...")
-        self.delete_profile_button.clicked.connect(self.delete_profile)
+        self.edit_profile_button = QPushButton("...")
+        self.edit_profile_button.clicked.connect(self.edit_profile)
         profile_layout.addWidget(self.profile_label)
         profile_layout.addWidget(self.profile_combo_box, 1)
         profile_layout.addWidget(self.add_profile_button)
-        profile_layout.addWidget(self.delete_profile_button)
+        profile_layout.addWidget(self.edit_profile_button)
         top_panel_layout.addWidget(profile_frame, 1)
         self.switch_to_modpacks_button = QPushButton()
         self.switch_to_modpacks_button.setObjectName("ModeSwitchButton")
@@ -650,6 +847,51 @@ class ZeroManager(QMainWindow):
         self.translator.load_language(lang_code)
         self.retranslate_ui()
 
+    def handle_one_click_install(self, url):
+        t = self.translator.get
+        self.tabs.setCurrentWidget(self.download_tab)
+        QMessageBox.information(self, t("one_click_install_title"), t("one_click_install_info").format(url=url))
+        self.download_tab.start_one_click_download(url)
+
+    def register_url_scheme(self):
+        if winreg is None:
+            print("Advertencia: No se puede registrar el esquema de URL en este sistema operativo.")
+            return
+
+        try:
+            if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+                exe_path = sys.executable
+                command = f'"{exe_path}" "%1"'
+            else:
+                python_exe_path = sys.executable
+                script_path = os.path.abspath(__file__)
+                command = f'"{python_exe_path}" "{script_path}" "%1"'
+
+            print(f"Comando de registro para el usuario actual: {command}")
+
+            base_key_path = r"Software\Classes\zmm"
+            
+            command_key_path = base_key_path + r"\shell\open\command"
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, command_key_path) as key:
+                    existing_command, _ = winreg.QueryValueEx(key, None)
+                if existing_command == command:
+                    print("El esquema de URL ya está registrado correctamente para el usuario actual.")
+                    return
+            except FileNotFoundError:
+                pass 
+
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, base_key_path) as key:
+                winreg.SetValue(key, '', winreg.REG_SZ, 'URL:Zero Mod Manager Protocol')
+                winreg.SetValueEx(key, 'URL Protocol', 0, winreg.REG_SZ, '')
+                with winreg.CreateKey(key, r"shell\open\command") as command_key:
+                    winreg.SetValue(command_key, '', winreg.REG_SZ, command)
+            
+            print("Esquema de URL 'zmm://' registrado/actualizado con éxito para el usuario actual.")
+
+        except Exception as e:
+            print(f"ERROR: Ocurrió un error inesperado al registrar el esquema de URL para el usuario: {e}")
+
     def retranslate_ui(self):
         t = self.translator.get
         self.setWindowTitle(t("app_title"))
@@ -665,7 +907,7 @@ class ZeroManager(QMainWindow):
         self.tabs.setTabToolTip(info_tab_index, t("tab_info_tooltip"))
         self.profile_label.setText(t("profile_label"))
         self.add_profile_button.setText(t("profile_add"))
-        self.delete_profile_button.setText(t("profile_delete"))
+        self.edit_profile_button.setText(t("profile_edit"))
         self.toggle_all_button.setText(t("home_activate_all"))
         self.disable_all_button.setText(t("home_deactivate_all"))
         self.manual_install_button.setText(t("home_install_manual"))
@@ -728,15 +970,27 @@ class ZeroManager(QMainWindow):
         self.config.setdefault("mods", {})
         self.config.setdefault("bypass_active", False)
         self.config.setdefault("game_path", "")
-        self.config.setdefault("profiles", {"Default": []})
+        self.config.setdefault("profiles", {"Default": {}})
         self.config.setdefault("current_profile", "Default")
         self.config.setdefault("particle_animation_enabled", False)
         self.config.setdefault("modpacks", {})
         self.config.setdefault("active_modpack", None)
         self.config.setdefault("mod_management_mode", "profiles")
+
+        profiles_migrated = False
+        for profile_name, profile_data in self.config.get("profiles", {}).items():
+            if isinstance(profile_data, list):
+                profiles_migrated = True
+                new_profile_data = {mod_name: {"active": True} for mod_name in profile_data}
+                self.config["profiles"][profile_name] = new_profile_data
+        
+        if profiles_migrated:
+            self.save_config()
+
         if "Default" not in self.config["profiles"]:
-            self.config["profiles"]["Default"] = []
+            self.config["profiles"]["Default"] = {}
             self.config["current_profile"] = "Default"
+
         self.retranslate_ui()
         self.initialize_game_path()
         self.sync_mods_folder()
@@ -792,6 +1046,7 @@ class ZeroManager(QMainWindow):
             items_in_temp = os.listdir(temp_extract_path)
             final_mod_name = clean_mod_name
             source_to_move = temp_extract_path
+            
             if len(items_in_temp) == 1 and os.path.isdir(os.path.join(temp_extract_path, items_in_temp[0])):
                 final_mod_name = items_in_temp[0]
                 source_to_move = os.path.join(temp_extract_path, final_mod_name)
@@ -800,7 +1055,9 @@ class ZeroManager(QMainWindow):
                 if len(potential_mod_dirs) == 1:
                     final_mod_name = potential_mod_dirs[0]
                     source_to_move = os.path.join(temp_extract_path, final_mod_name)
+            
             final_dest_path = os.path.join(MODS_DIR, final_mod_name)
+
             if final_mod_name in self.config["mods"]:
                 if QMessageBox.question(self, t("dialog_mod_exists_title"), t("dialog_mod_exists_text").format(mod_name=final_mod_name), QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
                     self.update_worker_signals.update_status_bar.emit(t("status_replacing_mod").format(mod_name=final_mod_name), 3000)
@@ -808,6 +1065,7 @@ class ZeroManager(QMainWindow):
                 else:
                     self.update_worker_signals.update_status_bar.emit(t("status_replace_cancelled").format(mod_name=final_mod_name), 3000)
                     return
+            
             if source_to_move == temp_extract_path: os.rename(temp_extract_path, final_dest_path)
             else:
                 shutil.move(source_to_move, final_dest_path)
@@ -828,12 +1086,26 @@ class ZeroManager(QMainWindow):
             if saved_image_path:
                 mod_entry["manual_image_path"] = saved_image_path
 
+            mod_entry["active"] = mod_entry.get("active", False)
             if mod_gamebanana_info:
                 mod_entry["gamebanana_info"] = mod_gamebanana_info
                 mod_entry["gamebanana_info"]["update_available"] = False
-            mod_entry["active"] = mod_entry.get("active", False)
+            
+            current_profile_name = self.config.get("current_profile")
+            if self.config.get("mod_management_mode") == "profiles" and current_profile_name:
+                if current_profile_name in self.config["profiles"]:
+                    self.config["profiles"][current_profile_name][final_mod_name] = {"active": True}
+                    self.save_config()
+                    self.update_mod_list()
+
             self.save_config()
             self.update_worker_signals.update_status_bar.emit(t("status_mod_installed_success").format(mod_name=final_mod_name), 5000)
+            if is_download: 
+                self.update_worker_signals.show_message_box.emit(
+                    t("download_complete_title"),
+                    t("download_complete_text").format(mod_name=final_mod_name),
+                    QMessageBox.Icon.Information.value
+                )
 
         except Exception as e:
             self.update_worker_signals.show_message_box.emit(t("dialog_install_error_title"), t("dialog_generic_install_error_text").format(mod_name=clean_mod_name, error=e), QMessageBox.Icon.Critical.value)
@@ -953,16 +1225,20 @@ class ZeroManager(QMainWindow):
     def toggle_mod(self, mod_name, checked, button, indicator):
         if self.is_applying_profile or self.config.get("mod_management_mode") != "profiles":
             return
+        
+        t = self.translator.get
         if not self.game_path_is_valid or not self.modding_power_button.isChecked():
-            QMessageBox.warning(self, self.translator.get("dialog_modding_deactivated_title"), self.translator.get("dialog_modding_deactivated_text"))
+            QMessageBox.warning(self, t("dialog_modding_deactivated_title"), t("dialog_modding_deactivated_text"))
+            button.blockSignals(True)
             button.setChecked(not checked)
+            button.blockSignals(False)
             return
+
         current_profile = self.config["current_profile"]
-        active_mods_in_profile = self.config["profiles"].get(current_profile, [])
-        if checked and mod_name not in active_mods_in_profile: active_mods_in_profile.append(mod_name)
-        elif not checked and mod_name in active_mods_in_profile: active_mods_in_profile.remove(mod_name)
-        self.config["profiles"][current_profile] = active_mods_in_profile
-        self.save_config()
+        if current_profile in self.config["profiles"] and mod_name in self.config["profiles"][current_profile]:
+            self.config["profiles"][current_profile][mod_name]["active"] = checked
+            self.save_config()
+
         self._apply_mod_state(mod_name, checked, button, indicator)
 
     def _apply_mod_state(self, mod_name, checked, button, indicator, base_path=None):
@@ -1063,7 +1339,8 @@ class ZeroManager(QMainWindow):
         for mod_name in mods_in_app_folder - mods_in_config: self.config['mods'][mod_name] = {"active": False, "deployed_paths": [], "gamebanana_info": None}
         for mod_name in mods_in_config - mods_in_app_folder:
             for profile in self.config["profiles"]:
-                if mod_name in self.config["profiles"][profile]: self.config["profiles"][profile].remove(mod_name)
+                if mod_name in self.config["profiles"][profile]:
+                    del self.config["profiles"][profile][mod_name]
             if mod_name in self.config['mods']: del self.config['mods'][mod_name]
         self.save_config()
         self.update_mod_list()
@@ -1077,7 +1354,7 @@ class ZeroManager(QMainWindow):
         self.manual_install_button.setEnabled(self.game_path_is_valid)
         self.update_mods_button.setEnabled(self.game_path_is_valid)
         self.add_profile_button.setEnabled(self.game_path_is_valid and is_profile_mode)
-        self.delete_profile_button.setEnabled(self.game_path_is_valid and is_profile_mode and self.config.get("current_profile") != "Default")
+        self.edit_profile_button.setEnabled(self.game_path_is_valid and is_profile_mode)
         for i in range(self.mod_list.count()):
             widget = self.mod_list.itemWidget(self.mod_list.item(i))
             if isinstance(widget, QWidget) and hasattr(widget, 'findChild'):
@@ -1159,24 +1436,42 @@ class ZeroManager(QMainWindow):
 
     def update_mod_list(self):
         self.mod_list.clear()
-        sorted_mods = sorted(self.config["mods"].items())
-        if not sorted_mods:
+        
+        current_profile = self.config.get("current_profile", "Default")
+        
+        if current_profile not in self.config["profiles"]:
+            self.config["current_profile"] = "Default"
+            current_profile = "Default"
+            self.save_config()
+            self.load_profiles()
+        
+        mods_in_profile_data = self.config["profiles"].get(current_profile, {})
+        
+        sorted_mod_names = sorted(mods_in_profile_data.keys())
+
+        if not sorted_mod_names:
             item = QListWidgetItem(self.mod_list)
-            label = QLabel(self.translator.get("misc_no_mods_installed"))
+            
+            message_key = "misc_no_mods_installed" if current_profile == "Default" else "misc_no_mods_in_profile"
+            label = QLabel(self.translator.get(message_key))
+
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             label.setStyleSheet("padding: 40px; color: #a090c0; font-style: italic; background: transparent;")
             item.setSizeHint(label.sizeHint())
             self.mod_list.addItem(item)
             self.mod_list.setItemWidget(item, label)
         else:
-            for mod_name, mod_data in sorted_mods:
-                is_active = mod_data.get("active", False)
+            for mod_name in sorted_mod_names:
+                mod_profile_info = mods_in_profile_data[mod_name]
+                is_active = mod_profile_info.get("active", False)
+                
                 item = QListWidgetItem(self.mod_list)
                 item.setData(Qt.ItemDataRole.UserRole, mod_name)
                 widget = self.create_mod_widget(mod_name, is_active)
                 item.setSizeHint(widget.sizeHint())
                 self.mod_list.addItem(item)
                 self.mod_list.setItemWidget(item, widget)
+        
         self.update_ui_state()
 
     def create_mod_widget(self, mod_name, is_active):
@@ -1217,9 +1512,10 @@ class ZeroManager(QMainWindow):
                 self._delete_mod_files_and_paths(mod_name, keep_config_entry=False)
                 if mod_name in self.config["mods"]:
                     del self.config["mods"][mod_name]
+                
                 for profile_name in self.config["profiles"]:
                     if mod_name in self.config["profiles"][profile_name]:
-                        self.config["profiles"][profile_name].remove(mod_name)
+                        del self.config["profiles"][profile_name][mod_name]
                 
                 self.save_config()
                 self.sync_mods_folder()
@@ -1269,12 +1565,23 @@ class ZeroManager(QMainWindow):
         if not self.game_path_is_valid or not self.modding_power_button.isChecked():
             QMessageBox.warning(self, t("dialog_modding_deactivated_title"), t("dialog_modding_deactivated_action_text"))
             return
+        
         current_profile = self.config["current_profile"]
-        all_mod_names = list(self.config["mods"].keys())
-        self.config["profiles"][current_profile] = all_mod_names if activate else []
+        mods_in_profile = self.config["profiles"].get(current_profile, {})
+        
+        self.is_applying_profile = True
+        
+        for mod_name in mods_in_profile.keys():
+            self.config["profiles"][current_profile][mod_name]["active"] = activate
+            if self.config["mods"][mod_name].get("active", False) != activate:
+                self._apply_mod_state(mod_name, activate, None, None)
+
         self.save_config()
-        self.apply_current_profile_state()
+        self.is_applying_profile = False
         self.update_mod_list()
+        
+        action_text = t("status_all_mods_activated") if activate else t("status_all_mods_deactivated")
+        self.statusBar().showMessage(action_text, 3000)
 
     def save_config(self):
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f: json.dump(self.config, f, indent=4)
@@ -1351,24 +1658,43 @@ class ZeroManager(QMainWindow):
             display_name = gamebanana_info.get('_sName')
         self.mod_details_name_label.setText(display_name)
 
-        if not gamebanana_info:
-            self.mod_details_image_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        image_url = None
+        if gamebanana_info:
+            if gamebanana_info.get('_aPreviewMedia', {}).get('_aImages'):
+                images = gamebanana_info['_aPreviewMedia']['_aImages']
+                if images:
+                    base_url = images[0].get('_sBaseUrl', '')
+                    file_530 = images[0].get('_sFile530', '')
+                    if base_url and file_530:
+                        image_url = f"{base_url}/{file_530}"
+            
+            if not image_url:
+                image_url = gamebanana_info.get('image_url')
+
+        author_name = t("details_unknown_author")
+        if gamebanana_info:
+            submitter = gamebanana_info.get('_aSubmitter')
+            if submitter and isinstance(submitter, dict) and submitter.get('_sName'):
+                author_name = submitter['_sName']
+            else:
+                author_name = gamebanana_info.get('author_name', t("details_unknown_author"))
+        
+        self.mod_details_author_label.setText(t("details_author_prefix").format(author=author_name))
+
+        if image_url:
+            self.mod_details_image_label.setText(t("details_loading_image"))
+            threading.Thread(target=self._fetch_image_for_details, args=(self.mod_details_image_label, image_url), daemon=True).start()
+        else:
             manual_image_path = mod_data.get("manual_image_path")
             if manual_image_path and os.path.exists(manual_image_path):
                 pixmap = QPixmap(manual_image_path)
                 self._set_detail_image(self.mod_details_image_label, pixmap)
             else:
-                self.mod_details_image_label.setText(t("details_click_to_add_image"))
-        else:
-            if gamebanana_info.get('image_url'):
-                image_url = gamebanana_info.get('image_url')
-                self.mod_details_image_label.setText(t("details_loading_image"))
-                threading.Thread(target=self._fetch_image_for_details, args=(self.mod_details_image_label, image_url), daemon=True).start()
-            else:
-                self.mod_details_image_label.setText(t("details_no_image"))
-        
+                self.mod_details_image_label.setText(t("details_click_to_add_image") if not gamebanana_info else t("details_no_image"))
+                if not gamebanana_info:
+                    self.mod_details_image_label.setCursor(Qt.CursorShape.PointingHandCursor)
+
         if gamebanana_info and gamebanana_info.get('_idRow'):
-            self.mod_details_author_label.setText(t("details_author_prefix").format(author=gamebanana_info.get('author_name', t("details_unknown_author"))))
             created_ts, last_updated_ts = gamebanana_info.get('_tsDateAdded', 0), gamebanana_info.get('_tsDateModified', 0)
             is_update = last_updated_ts != created_ts
             status_text = t("details_date_updated") if is_update else t("details_date_published")
@@ -1534,12 +1860,23 @@ class ZeroManager(QMainWindow):
     def _on_update_download_finished(self, file_path, mod_name_downloaded, mod_gamebanana_info):
         t = self.translator.get
         self.update_worker_signals.update_status_bar.emit(t("status_update_download_finished").format(mod_name=mod_name_downloaded), 0)
+        
+        original_mod_data_for_profile = {
+            "gamebanana_info": mod_gamebanana_info,
+            "manual_image_path": None
+        }
+
         self.install_mod_from_path(file_path, mod_name_downloaded, is_download=True, mod_gamebanana_info=mod_gamebanana_info)
+        
         mod_data = self.config["mods"].get(mod_name_downloaded)
-        if mod_data and mod_data.get("gamebanana_info"):
-            mod_data["gamebanana_info"].update({"update_available": False, "_tsDateModified": mod_gamebanana_info["_tsDateModified"]})
-            mod_data["gamebanana_info"].pop("latest_full_info", None)
+        if mod_data and mod_gamebanana_info: 
+            mod_data.update({
+                "gamebanana_info": mod_gamebanana_info,
+                "gamebanana_info": {"update_available": False, "_tsDateModified": mod_gamebanana_info.get("_tsDateModified", 0)}
+            })
+            mod_data.pop("latest_full_info", None)
             self.save_config()
+        
         self.update_worker_signals.update_status_bar.emit(t("status_mod_updated_successfully").format(mod_name=mod_name_downloaded), 5000)
         self.update_worker_signals.update_process_finished.emit(mod_name_downloaded)
 
@@ -1561,29 +1898,68 @@ class ZeroManager(QMainWindow):
 
     def add_profile(self):
         t = self.translator.get
-        text, ok = QInputDialog.getText(self, t("dialog_add_profile_title"), t("dialog_add_profile_text"))
-        if ok and text:
-            if text in self.config["profiles"]:
-                QMessageBox.warning(self, t("dialog_profile_exists_title"), t("dialog_profile_exists_text").format(profile_name=text))
-                return
-            self.config["profiles"][text] = []
-            self.config["current_profile"] = text
-            self.save_config()
-            self.load_profiles()
-            self.update_mod_list()
+        
+        all_mods_data = {}
+        for mod_name, mod_info in self.config["mods"].items():
+            display_name = mod_info.get("gamebanana_info", {}).get("_sName", mod_name)
+            all_mods_data[mod_name] = {"display_name": display_name}
 
-    def delete_profile(self):
-        t = self.translator.get
-        profile_to_delete = self.config.get("current_profile")
-        if profile_to_delete == "Default":
-            QMessageBox.warning(self, t("dialog_action_not_allowed_title"), t("dialog_cannot_delete_default_profile"))
-            return
-        if QMessageBox.question(self, t("dialog_confirm_delete_title"), t("dialog_confirm_delete_profile_text").format(profile_name=profile_to_delete), QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
-            del self.config["profiles"][profile_to_delete]
-            self.config["current_profile"] = "Default"
+        dialog = ProfileEditDialog(self.translator, all_mods_data, parent=self)
+        if dialog.exec():
+            data = dialog.get_data()
+            profile_name = data["name"]
+            if not profile_name:
+                QMessageBox.warning(self, t("dialog_profile_error_title"), t("dialog_profile_name_required"))
+                return
+            if profile_name in self.config["profiles"]:
+                QMessageBox.warning(self, t("dialog_profile_exists_title"), t("dialog_profile_exists_text").format(profile_name=profile_name))
+                return
+
+            new_profile_data = {mod_name: {"active": True} for mod_name in data["mods"]}
+            self.config["profiles"][profile_name] = new_profile_data
+            self.config["current_profile"] = profile_name
             self.save_config()
             self.load_profiles()
             self.apply_current_profile_state()
+
+    def edit_profile(self):
+        t = self.translator.get
+        current_profile = self.config.get("current_profile")
+        if not current_profile:
+            return
+
+        all_mods_data = {}
+        for mod_name, mod_info in self.config["mods"].items():
+            display_name = mod_info.get("gamebanana_info", {}).get("_sName", mod_name)
+            all_mods_data[mod_name] = {"display_name": display_name}
+
+        current_profile_mods = list(self.config["profiles"].get(current_profile, {}).keys())
+        
+        dialog = ProfileEditDialog(self.translator, all_mods_data, profile_name=current_profile, selected_mods=current_profile_mods, parent=self)
+        if dialog.exec():
+            data = dialog.get_data()
+
+            if data["deleted"]:
+                if current_profile in self.config["profiles"]:
+                    del self.config["profiles"][current_profile]
+                self.config["current_profile"] = "Default"
+                self.save_config()
+                self.load_profiles()
+                self.apply_current_profile_state()
+            else:
+                old_profile_data = self.config["profiles"].get(current_profile, {})
+                new_profile_data = {}
+                selected_mod_names = data["mods"]
+
+                for mod_name in selected_mod_names:
+                    if mod_name in old_profile_data:
+                        new_profile_data[mod_name] = old_profile_data[mod_name]
+                    else:
+                        new_profile_data[mod_name] = {"active": True}
+                
+                self.config["profiles"][current_profile] = new_profile_data
+                self.save_config()
+                self.apply_current_profile_state()
 
     def change_profile(self, index):
         if index == -1: return
@@ -1597,15 +1973,25 @@ class ZeroManager(QMainWindow):
 
     def apply_current_profile_state(self):
         self.is_applying_profile = True
-        current_profile = self.config["current_profile"]
-        mods_to_be_active = self.config["profiles"].get(current_profile, [])
-        for mod_name, mod_data in self.config["mods"].items():
-            should_be_active = mod_name in mods_to_be_active
-            is_currently_active = mod_data.get("active", False)
-            if should_be_active != is_currently_active: self._apply_mod_state(mod_name, should_be_active, None, None)
+        current_profile_name = self.config["current_profile"]
+        mods_in_profile_data = self.config["profiles"].get(current_profile_name, {})
+        
+        currently_active_mods = [mod for mod, data in self.config["mods"].items() if data.get("active")]
+        
+        for mod_name in currently_active_mods:
+            should_be_active = mods_in_profile_data.get(mod_name, {}).get("active", False)
+            if not should_be_active:
+                self._apply_mod_state(mod_name, False, None, None)
+
+        for mod_name, mod_data in mods_in_profile_data.items():
+            is_currently_active = self.config["mods"].get(mod_name, {}).get("active", False)
+            should_be_active = mod_data.get("active", False)
+            if should_be_active and not is_currently_active:
+                self._apply_mod_state(mod_name, True, None, None)
+
         self.is_applying_profile = False
         self.update_mod_list()
-        self.statusBar().showMessage(self.translator.get("status_profile_mods_applied").format(profile_name=current_profile), 3000)
+        self.statusBar().showMessage(self.translator.get("status_profile_mods_applied").format(profile_name=current_profile_name), 3000)
 
     def _deactivate_all_active_mods(self):
         active_mods_found = False
@@ -1782,7 +2168,12 @@ class ZeroManager(QMainWindow):
             QMessageBox.information(self, t("modpack_creation_error_title"), t("modpack_no_mods_to_create"))
             return
         
-        dialog = ModpackCreationDialog(available_mods_data, self.translator, self)
+        profiles_data = {
+            profile_name: list(mods_dict.keys())
+            for profile_name, mods_dict in self.config["profiles"].items()
+        }
+
+        dialog = ModpackCreationDialog(available_mods_data, self.translator, self, profiles_data=profiles_data)
         if dialog.exec():
             data = dialog.get_data()
             name = data["name"].strip()
@@ -1931,6 +2322,27 @@ class ZeroManager(QMainWindow):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setWindowIcon(QIcon(resource_path("img/icon.png")))
-    window = ZeroManager()
-    window.show()
-    sys.exit(app.exec())
+    app_guid = "zmm-sparking-zero-manager-portable-guid"
+    socket = QLocalSocket()
+    socket.connectToServer(app_guid)
+
+    if socket.waitForConnected(500):
+        if len(sys.argv) > 1 and sys.argv[1].startswith("zmm:"):
+            socket.write(sys.argv[1].encode('utf-8'))
+            socket.flush()
+            socket.waitForBytesWritten(2000)
+        else:
+            print("No hay argumentos de URL para enviar. Saliendo...")
+        socket.close()
+        sys.exit(0)
+    else:
+        window = ZeroManager()
+        window.local_server = QLocalServer()
+        QLocalServer.removeServer(app_guid)
+        window.local_server.listen(app_guid)
+        window.local_server.newConnection.connect(window.new_instance_handler)
+        window.show()
+
+        if len(sys.argv) > 1 and sys.argv[1].startswith("zmm:"):
+            QTimer.singleShot(100, lambda: window.handle_one_click_install(sys.argv[1]))
+        sys.exit(app.exec())

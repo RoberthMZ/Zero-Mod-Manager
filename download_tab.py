@@ -2,6 +2,7 @@ import os
 import re
 import requests
 import threading
+import urllib.parse
 from datetime import datetime
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QScrollArea, QGridLayout, QLabel,
@@ -45,9 +46,36 @@ def _extract_category_id_from_url(url):
     if match: return int(match.group(1))
     return None
 
+
 class Downloader(QObject):
     finished = pyqtSignal(str, str, dict)
     error = pyqtSignal(str)
+    progress_updated = pyqtSignal(str, int)
+
+    def run(self):
+        try:
+            os.makedirs(DOWNLOADS_DIR, exist_ok=True)
+            safe_file_name = re.sub(r'[/*?:"<>|]', "", self.file_name)
+            final_path = os.path.join(DOWNLOADS_DIR, safe_file_name)
+
+            with requests.get(self.url, stream=True, timeout=30) as r:
+                r.raise_for_status()
+                total_size = int(r.headers.get('content-length', 0))
+                downloaded_size = 0
+                
+                with open(final_path, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                        if total_size > 0:
+                            downloaded_size += len(chunk)
+                            progress = int((downloaded_size * 100) / total_size)
+                            self.progress_updated.emit(self.mod_name, progress)
+            
+            self.progress_updated.emit(self.mod_name, 100)
+            self.finished.emit(final_path, self.mod_name, self.mod_info)
+
+        except Exception as e:
+            self.error.emit(str(e))
 
     def __init__(self, url, file_name, mod_name, mod_info):
         super().__init__()
@@ -272,6 +300,9 @@ class DownloadTab(QWidget):
     update_gamebanana_logo_signal = pyqtSignal(QPixmap)
     mod_image_loaded_signal = pyqtSignal(int, QPixmap)
     create_mod_card_ui_signal = pyqtSignal(dict)
+    update_main_status = pyqtSignal(str, int)
+    show_main_message_box = pyqtSignal(str, str, int)
+    _one_click_info_ready = pyqtSignal(str, str, str, dict)
 
     def __init__(self, translator: Translator, parent=None):
         super().__init__(parent)
@@ -284,6 +315,7 @@ class DownloadTab(QWidget):
         self.current_category, self.current_search = None, ""
         self.show_nsfw = False
         self.current_status_message = ""
+        self.active_downloaders = set() 
 
         self._accumulated_filtered_mods_cache = []
         self._last_api_page_scanned = 0
@@ -296,7 +328,7 @@ class DownloadTab(QWidget):
         self.update_gamebanana_logo_signal.connect(self.set_gamebanana_logo)
         self.mod_image_loaded_signal.connect(self._update_mod_card_image)
         self.create_mod_card_ui_signal.connect(self._create_and_add_mod_card_to_layout)
-        
+        self._one_click_info_ready.connect(self._start_download_from_worker)
         self.setup_ui()
         self.retranslate_ui()
         threading.Thread(target=self._fetch_gamebanana_logo_thread, daemon=True).start()
@@ -399,6 +431,69 @@ class DownloadTab(QWidget):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self._update_grid_layout()
+    
+    def start_one_click_download(self, url):
+        t = self.t 
+        try:
+            self.update_main_status.emit(t("download_tab_one_click_fetching_info"), 0)
+            
+            payload = url.split(":", 1)[1]
+
+            parts = payload.split(',')
+            if len(parts) < 3:
+                raise ValueError(t("one_click_error_missing_params"))
+
+            download_url = parts[0]
+            mod_id_str = parts[2]
+            mod_id = int(mod_id_str)
+            
+            try:
+                file_id_str = download_url.split('/')[-1]
+                file_id_to_find = int(file_id_str)
+            except (IndexError, ValueError):
+                raise ValueError(t("one_click_error_invalid_file_id", "No se pudo extraer un ID de archivo válido de la URL de descarga."))
+            
+            print(f"Parseo exitoso -> ModID: {mod_id}, FileID a buscar: {file_id_to_find}")
+
+            threading.Thread(target=self._fetch_info_and_download, args=(mod_id, file_id_to_find, download_url), daemon=True).start()
+
+        except Exception as e:
+            print(f"!!! ERROR en start_one_click_download: {e}")
+            self.show_error_message_signal.emit(t("one_click_error_title"), str(e))
+
+    def _fetch_info_and_download(self, mod_id, file_id_to_find, download_url):
+        t = self.t
+        try:
+            files_api_url = f"https://gamebanana.com/apiv11/Mod/{mod_id}/Files"
+            headers = {'User-Agent': 'ZeroModManager/1.0'}
+            files_response = requests.get(files_api_url, headers=headers, timeout=15)
+            files_response.raise_for_status()
+            files_data = files_response.json()
+            target_file = next((f for f in files_data if f.get('_idRow') == file_id_to_find), None)
+
+            if not target_file:
+                raise ValueError(f"No se encontró un archivo con ID {file_id_to_find} en la respuesta de la API.")
+
+            mod_api_url = f"https://gamebanana.com/apiv11/Mod/{mod_id}"
+            params = {'_csvProperties': '@gbprofile'}
+            mod_response = requests.get(mod_api_url, params=params, headers=headers, timeout=10)
+            mod_response.raise_for_status()
+            raw_mod_metadata = mod_response.json()
+
+            mod_name_for_display = raw_mod_metadata.get('_sName', target_file.get('_sFile'))
+
+            self._one_click_info_ready.emit(
+                download_url,
+                target_file['_sFile'],
+                mod_name_for_display,
+                raw_mod_metadata
+            )
+
+        except Exception as e:
+            error_msg = t("one_click_error_api_failed").format(error=str(e))
+            self.show_error_message_signal.emit(t("one_click_error_title"), error_msg)
+            print(f"!!! Error detallado en _fetch_info_and_download: {e}")
+
 
     def _update_grid_layout(self):
         margin_left = self.mod_cards_layout.contentsMargins().left()
@@ -612,3 +707,36 @@ class DownloadTab(QWidget):
                 card_instance.on_download_error(self.t("file_dialog.no_file_selected"))
         else:
             card_instance.on_download_error(self.t("file_dialog.selection_cancelled"))
+
+
+    def _start_download_from_worker(self, download_url, file_name, mod_name, mod_metadata):
+        downloader = Downloader(download_url, file_name, mod_name, mod_metadata)
+        downloader.setParent(self) 
+
+        downloader.progress_updated.connect(self._on_download_progress)
+        downloader.finished.connect(self._on_download_finished_for_1_click)
+        downloader.error.connect(self._on_download_error_for_1_click)
+        
+        downloader.finished.connect(downloader.deleteLater)
+        downloader.error.connect(downloader.deleteLater)
+        
+        threading.Thread(target=downloader.run, daemon=True).start()
+        
+    def _on_download_progress(self, mod_name, percentage):
+            message = self.t("download_tab_downloading_progress").format(mod_name=mod_name, progress=percentage)
+            self.update_main_status.emit(message, 0) 
+
+    def _on_download_finished_for_1_click(self, file_path, mod_name, mod_info):
+        install_starting_msg = self.t("status_starting_install").format(mod_name=mod_name)
+        self.update_main_status.emit(install_starting_msg, 4000)
+
+        self.mod_downloaded.emit(file_path, mod_name, True, mod_info)
+
+    def _on_download_error_for_1_click(self, error_msg):
+        self.update_main_status.emit(self.t("download_error_status"), 5000)
+
+        self.show_main_message_box.emit(
+            self.t("mod_card.download_error_dialog_title"),
+            error_msg,
+            QMessageBox.Icon.Critical.value
+        )
